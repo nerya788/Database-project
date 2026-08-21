@@ -66,9 +66,15 @@ HAVING cnt > 1;
 -- =====================================================================
 -- 6. GLOBAL_EQUIPMENT — categorical spread
 -- =====================================================================
-SELECT item_type, COUNT(*) AS cnt,
-       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Global_Equipment), 2) AS pct
-FROM Global_Equipment GROUP BY item_type ORDER BY cnt DESC;
+-- item_type no longer exists on Global_Equipment (replaced by the
+-- Training_Gear / Medical_Kits specialization); use gear_category / kit_type instead.
+SELECT gear_category, COUNT(*) AS cnt,
+       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Training_Gear), 2) AS pct
+FROM Training_Gear GROUP BY gear_category ORDER BY cnt DESC;
+
+SELECT kit_type, COUNT(*) AS cnt,
+       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Medical_Kits), 2) AS pct
+FROM Medical_Kits GROUP BY kit_type ORDER BY cnt DESC;
 
 SELECT brand_model, COUNT(*) AS cnt,
        ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Global_Equipment), 2) AS pct

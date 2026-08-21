@@ -10,9 +10,17 @@ SELECT 'Teams', COUNT(*) FROM Teams
 UNION ALL
 SELECT 'Global_Equipment', COUNT(*) FROM Global_Equipment
 UNION ALL
+SELECT 'Training_Gear', COUNT(*) FROM Training_Gear
+UNION ALL
+SELECT 'Medical_Kits', COUNT(*) FROM Medical_Kits
+UNION ALL
 SELECT 'Practices', COUNT(*) FROM Practices
 UNION ALL
-SELECT 'Matches', COUNT(*) FROM Matches;
+SELECT 'Matches', COUNT(*) FROM Matches
+UNION ALL
+SELECT 'Maintenance_Logs', COUNT(*) FROM Maintenance_Logs
+UNION ALL
+SELECT 'Match_Events', COUNT(*) FROM Match_Events;
 
 
 USE school_football_db;
