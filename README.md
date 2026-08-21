@@ -17,7 +17,13 @@ This database system manages an extensive national school football league, integ
 - **In-Game Analytics ($M:N$):** Tracks detailed live match occurrences (goals, cards, substitutions) linking athletes directly to individual competitive fixtures.
 - **Facility Maintenance (Weak Entity):** Records periodic safety inspections and structural maintenance logs uniquely identified in association with individual sports venues.
 
-The database is normalized to **Third Normal Form (3NF)** to eliminate data redundancy and preserve strict referential integrity.
+### 1.1 Normalization & Architectural Justifications (3NF Compliance)
+The database satisfies **3NF** criteria across all relations (atomic values, full functional dependency on composite keys in `Maintenance_Logs`, and zero transitive dependencies).
+
+Two design choices are explicitly justified below:
+- **Denormalized Match Scores (`home_score`, `away_score`):** While final scores could theoretically be computed via `COUNT(*)` over `Match_Events`, they are retained in `Matches` as intentional pre-aggregated values to optimize frequent dashboard reads, historical archiving, and reporting performance without executing intensive multi-table aggregations.
+- **Address & Locality Granularity (`city` vs. `full_address` / `city_address`):** `city` is preserved as a dedicated attribute alongside full address strings across `Schools` and `Fields` to enable direct indexing, fast geographic filtering, and league grouping without parsing free-text address strings.
+
 
 ---
 
