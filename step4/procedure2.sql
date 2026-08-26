@@ -6,7 +6,7 @@
 --   held in a fantasy squad, recompute their market price from real-world
 --   match performance, archive the new price into PRICE_HISTORY for the
 --   round, and transition the round lifecycle (Active -> Completed, and the
---   next round Upcoming -> Active).
+--   next not-yet-completed round -> Active).
 --
 -- Business logic:
 --   - The target round must exist and currently be 'Active'.
@@ -14,9 +14,12 @@
 --     fn_calculate_player_market_value(); a failure for one player is
 --     logged and skipped rather than aborting the whole settlement
 --     (error recovery), so a single bad record cannot block the round.
---   - After processing, the round is marked 'Completed' and, if a
---     subsequent round exists and is 'Upcoming', it is activated
---     (conditional handling).
+--   - After processing, the round is marked 'Completed'. The next round in
+--     sequence (smallest round_id greater than p_round_id whose status is
+--     not already 'Completed') is then activated. If no such round exists
+--     (this was the final round of the season), settlement still succeeds
+--     and a NOTICE reports the season has ended - no exception is raised
+--     (conditional handling / graceful termination).
 --
 -- Parameters:
 --   p_round_id           - round being settled
@@ -32,18 +35,17 @@ CREATE OR REPLACE PROCEDURE sp_settle_round(
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_round_number    INT;
     v_status          VARCHAR(50);
     v_player          RECORD;
     v_new_price       NUMERIC(10, 2);
     v_next_history_id INT;
-    v_activated_next  INT := 0;
+    v_next_round_id   INT;
 BEGIN
     p_players_processed := 0;
     p_errors_encountered := 0;
 
     -- 1. Validate the round exists and is ready to be settled
-    SELECT round_number, status INTO v_round_number, v_status
+    SELECT status INTO v_status
     FROM ROUNDS
     WHERE round_id = p_round_id;
 
@@ -95,16 +97,32 @@ BEGIN
     SET status = 'Completed'
     WHERE round_id = p_round_id;
 
-    -- 5. Conditionally activate the next round, if one is waiting
-    UPDATE ROUNDS
-    SET status = 'Active'
-    WHERE round_number = v_round_number + 1
-      AND status = 'Upcoming';
+    RAISE NOTICE 'Round % settled: % players processed, % errors.',
+        p_round_id, p_players_processed, p_errors_encountered;
 
-    GET DIAGNOSTICS v_activated_next = ROW_COUNT;
+    -- 5. Locate the next round in sequence that has not yet completed
+    --    (lock it so a concurrent settlement can't race this update)
+    SELECT round_id INTO v_next_round_id
+    FROM ROUNDS
+    WHERE round_id > p_round_id
+      AND status <> 'Completed'
+    ORDER BY round_id ASC
+    LIMIT 1
+    FOR UPDATE;
 
-    RAISE NOTICE 'Round % settled: % players processed, % errors, next round activated: %',
-        p_round_id, p_players_processed, p_errors_encountered, (v_activated_next > 0);
+    IF FOUND THEN
+        -- 6a. Activate the next round
+        UPDATE ROUNDS
+        SET status = 'Active'
+        WHERE round_id = v_next_round_id;
+
+        RAISE NOTICE 'Round % is now Completed; Round % has been activated.',
+            p_round_id, v_next_round_id;
+    ELSE
+        -- 6b. No subsequent round: end gracefully, no exception raised
+        RAISE NOTICE 'Round % is now Completed. No subsequent round found - the season has ended.',
+            p_round_id;
+    END IF;
 END;
 $$;
 
@@ -121,5 +139,12 @@ CALL sp_settle_round(503, NULL, NULL);
 -- Inspect the resulting price history entries for the settled round
 SELECT * FROM PRICE_HISTORY WHERE round_id = 503 ORDER BY history_id DESC LIMIT 10;
 
--- Confirm the round lifecycle transition
+-- Confirm the round lifecycle transition: round 503 is 'Completed' and the
+-- next round in sequence with status <> 'Completed' is now 'Active'
 SELECT round_id, round_number, status FROM ROUNDS WHERE round_id IN (503, 504);
+
+-- Season-end scenario: settling the final round leaves no successor, so the
+-- procedure should log a NOTICE ("season has ended") without raising an
+-- exception. Point this at whichever round_id is currently the last one
+-- with status = 'Active' in ROUNDS to exercise the graceful-termination path.
+-- CALL sp_settle_round(<final_round_id>, NULL, NULL);
