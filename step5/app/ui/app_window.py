@@ -67,6 +67,7 @@ class AppWindow(ctk.CTk):
 
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         self._views: dict[str, ctk.CTkBaseClass] = {}
+        self._categories_frame: ctk.CTkFrame | None = None
         self._category_buttons: dict[str, ctk.CTkButton] = {}
         self._category_leaf_frames: dict[str, ctk.CTkFrame] = {}
         self._leaf_buttons: dict[str, ctk.CTkButton] = {}
@@ -85,13 +86,10 @@ class AppWindow(ctk.CTk):
 
         self._build_views()
         self.show_view("dashboard")
-
-        # Prime the Manage Data accordion (Core School Data expanded,
-        # Schools selected and loading in the background) without actually
-        # navigating there, so it's instantly ready the first time the user
-        # clicks into Manage Data instead of starting from a blank state.
-        self._expand_category(TABLE_GROUPS[0][0])
-        self._activate_table(TABLE_GROUPS[0][1][0])
+        # Manage Data's category/table accordion starts fully collapsed with
+        # no selection highlight - it only expands and defaults to Core
+        # School Data / Schools once the user actually clicks into it (see
+        # _open_manage_data).
 
     def _build_sidebar(self) -> None:
         sidebar = ctk.CTkFrame(self, width=256, corner_radius=0, fg_color=SURFACE)
@@ -146,9 +144,16 @@ class AppWindow(ctk.CTk):
         header.pack(fill="x", pady=3)
         self._nav_buttons["crud"] = header
 
+        # All category headers + their table leaf lists live inside this one
+        # container so the whole accordion (not just the table leaves) can
+        # be shown/hidden as a unit - it's only packed while Manage Data is
+        # the active view (see _expand_manage_data / _collapse_manage_data).
+        categories_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._categories_frame = categories_frame
+
         for group_name, specs in TABLE_GROUPS:
             cat_btn = ctk.CTkButton(
-                parent, text=f"      {_COLLAPSED_ARROW}  {group_name}", anchor="w", height=34,
+                categories_frame, text=f"      {_COLLAPSED_ARROW}  {group_name}", anchor="w", height=34,
                 corner_radius=8, font=ctk.CTkFont(size=12),
                 fg_color="transparent", text_color=TEXT_MUTED, hover_color=SURFACE_ALT,
                 command=lambda g=group_name: self._open_category(g),
@@ -156,7 +161,7 @@ class AppWindow(ctk.CTk):
             cat_btn.pack(fill="x", pady=1)
             self._category_buttons[group_name] = cat_btn
 
-            leaf_frame = ctk.CTkFrame(parent, fg_color="transparent")
+            leaf_frame = ctk.CTkFrame(categories_frame, fg_color="transparent")
             # Not packed yet - _expand_category() packs it (positioned via
             # after=cat_btn, so it always lands right below its own header
             # regardless of packing order elsewhere) only while it's the
@@ -174,14 +179,22 @@ class AppWindow(ctk.CTk):
                 self._leaf_buttons[spec.key] = leaf_btn
 
     def _open_manage_data(self) -> None:
-        """Sidebar header click: navigate to Manage Data, defaulting to
-        Core School Data / Schools only if nothing has been picked yet -
-        revisiting keeps whatever the user last had open."""
+        """Sidebar header click: navigate to Manage Data, expand the
+        category accordion, and default to Core School Data / Schools.
+        _collapse_manage_data() always resets _active_category/_active_leaf
+        to None on the way out, so simply re-checking those covers both
+        "first time ever" and "returning after navigating away"."""
         self.show_view("crud")
+        self._expand_manage_data()
         if self._active_category is None:
             self._expand_category(TABLE_GROUPS[0][0])
         if self._active_leaf is None:
             self._activate_table(TABLE_GROUPS[0][1][0])
+
+    def _expand_manage_data(self) -> None:
+        """Show the Manage Data category accordion container (header row of
+        category buttons + whichever one's table list is expanded)."""
+        self._categories_frame.pack(fill="x", after=self._nav_buttons["crud"])
 
     def _open_category(self, group_name: str) -> None:
         """Category header click: navigate + expand, and default to that
@@ -207,6 +220,23 @@ class AppWindow(ctk.CTk):
         )
         self._category_buttons[group_name].configure(text=f"      {_EXPANDED_ARROW}  {group_name}")
 
+    def _collapse_manage_data(self) -> None:
+        """Close Manage Data's category/table accordion and clear its
+        selection highlight - called whenever the user navigates away to
+        Dashboard, Actions, or Reports & Insights, so the sidebar never sits
+        stale-expanded/highlighted on another screen."""
+        if self._active_category and self._active_category in self._category_leaf_frames:
+            prev = self._active_category
+            self._category_leaf_frames[prev].pack_forget()
+            self._category_buttons[prev].configure(text=f"      {_COLLAPSED_ARROW}  {prev}")
+
+        self._active_category = None
+        self._active_leaf = None
+        for btn in self._leaf_buttons.values():
+            btn.configure(fg_color="transparent", text_color=TEXT_MUTED)
+
+        self._categories_frame.pack_forget()
+
     def _open_table(self, spec: TableSpec) -> None:
         """A specific table leaf was clicked: navigate + load it."""
         self.show_view("crud")
@@ -215,7 +245,7 @@ class AppWindow(ctk.CTk):
     def _activate_table(self, spec: TableSpec) -> None:
         """Load `spec` into the CRUD content pane and update sidebar
         highlighting - without itself changing which top-level view is on
-        screen (used both by real clicks and by the startup priming call)."""
+        screen."""
         group_name = self._group_of_key[spec.key]
         if self._active_category != group_name:
             self._expand_category(group_name)
@@ -241,6 +271,9 @@ class AppWindow(ctk.CTk):
             if key == "dashboard":
                 self._views["dashboard"].refresh()
             return
+
+        if self._active_key == "crud" and key != "crud":
+            self._collapse_manage_data()
 
         for k, btn in self._nav_buttons.items():
             active = k == key
